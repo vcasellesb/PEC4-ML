@@ -1,0 +1,397 @@
+---
+title: 'PEC 4: Predicció de dolències cardíaques a partir d"un 
+electrocardiograma -- Part en R'
+author: "Vicent Caselles Ballester"
+date: "`r Sys.Date()`"
+output: pdf_document
+params:
+  data: ECGCvdata.csv
+  ks_to_try: !r c(1, 3, 5, 7)
+  class: ECG_signal
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message=F, out.width='70%', fig.align = 'center')
+
+# loading packages
+require(ggplot2); require(reshape2); require(patchwork); require(caret)
+```
+
+\tableofcontents
+
+<!---
+Inicialment, escric una mica de codi que té dos funcions:
+* Assegurar-se que tenim disponible el train i test datasets
+* Assegurar-se que el conjunt de dades no té cap NA
+-->
+```{r, echo=F}
+# primer mirem el primer punt 
+
+# Realment mirant el primer punt ja ens assegurem dels dos. Perquè no pot ser
+# que si hem generat el train/test.csv files no haguem tret les columnes amb NAs
+
+train <- !file.exists('train_data.csv')
+test <- !file.exists('test_data.csv')
+trainandtest <- any(c(train, test))
+if (trainandtest){
+  system(paste('./R_code/split_dataset.R', params$data))
+}
+
+# de totes formes, me'n vull assegurar. Si tot va bé, això no hauria perquè veure-ho ningú
+train <- read.csv('train_data.csv', row.names = 1)
+test <- read.csv('test_data.csv', row.names = 1)
+
+train_has_NA <- any(apply(X = train, MARGIN = 2, FUN = function(x) any(is.na(x))))
+test_has_NA <- any(apply(X=test, MARGIN=2, FUN=function(x)any(is.na(x))))
+if (train_has_NA | test_has_NA){
+  stop('Train and/or test dataset has NAs. This shouldn\'t happen')}
+
+# let's tidy up here. I like fresh starts (tabula rasa)
+which_to_eliminate <- grep('params', x=ls(), ignore.case = T, invert = T)
+rm(list=ls()[which_to_eliminate])
+```
+
+<!---
+Parsing all parameters
+-->
+```{r, echo=F}
+data <- params$data
+class <- params$class
+```
+
+
+# Introducció
+
+Aquest informe, en l'intent de ser "dinàmic" com s'ha anat demanant al llarg de tota l'assignatura, està pensat per a què es pugui controlar el *flow* del codi des de aquest fitxer directament. És a dir, no és necessari obrir el fitxer `.ipynb`, ni cap dels fitxers amb codi d'`R`, per a que s'executi correctament\footnote{Això no és del tot així. Preparar el fitxer \texttt{.ipynb} per a que pugui córrer a qualsevol ordinador no és un tema trivial. El problema es troba a la metadata de la \textit{notebook}, que requereix que especifiquis el nom del \texttt{kernel} de \texttt{ipython} que correrà la \textit{notebook}. Adjuntaré els resultats obtinguts amb les xarxes neuronals a l'entrega de la PEC, per a saltar-me aquest problema (el codi detecta els resultats i no corre la \textit{notebook}). Si voleu córrer el fitxer \texttt{.ipynb}, heu d'obrir-la i canviar, a la metadata, els següents camps: \texttt{name}, \texttt{display\_name}; allà heu de treure el nom que hi ha (que és el que correspon al meu \texttt{venv}), i ficar el nom del \texttt{kernel} o \texttt{venv} on tingueu instal·lat els \textit{requirements} per a córrer les xarxes neuronals (i.e. \texttt{keras}, \texttt{numpy}, etc.; ho trobareu a \texttt{requirements.txt}).}.
+
+Per exemple, per a fer la divisió dels *train* i *test subsets*, des d'aquest mateix *notebook* es crida la funció localitzada al directori `R_code` que s'encarrega de dur-ho a terme. Això ho dic ja que considero que el nivell d'abstracció és força alt. Tot depèn del detall al que volgueu arribar per a entendre com ho he fet, però si voleu arribar al màxim detall suposo que no us quedarà més remei que inspeccionar els diferents fitxers individualment amb un editor de text com `Rstudio`.
+
+Aquest present fitxer `Markdown` executa de nou el codi escrit en `Python` que entrena les xarxes neuronals **de nou** i genera noves prediccions. Les matrius de confusió que en resulten és el que es guarda, i és després carregat al present fitxer per a analitzar-ho. Això té inconvenients, com la variablitat dels resultats. Tot i això, en les vàries vegades que ho he executat els resultats han sigut semblants, així que no hi hauria d'haver cap problema.
+
+El *output* que es genera és el següent:
+
+* Un fitxer `.pdf` i un fitxer `.html` d'acord amb aquest present fitxer `.Rmd`.
+* Un fitxer `.pdf` resultat de córrer el *Jupyter Notebook* (`.ipynb`). Aquest realment no cal que s'inspeccioni, ja que es carreguen aquí les matrius de confusió obtingudes a partir de les prediccions amb les dades *test* utilitzant les dues xarxes neuronals entrenades al present document, utilitzant-les per a valorar-ne la *performance*. Tot i això, recomano que s'obri per a entendre el codi `Python`.
+* Un fitxer `.csv` amb les mètriques per classe de tots els algorismes. Aquests resultats no es mostren al present document però si que es comenten.
+
+# Exploració inicial del conjunt de dades
+
+Anem a explorar una mica les dades. Encara que el conjunt de dades inicial té `NAs`, tot i així per a l'EDA (*Exploratory Data Analysis*) vull treballar amb aquest. Així doncs, veureu segurament variables que després no participaran en els algorismes que implementaré. Sé que això no és gaire lògic, però em sembla que és més enriquidor. Primer de tot, observem quina és la distribució de la variable a predir (Figura \ref{fig:distpred}).
+
+```{r}
+data <- read.csv(data, row.names=1)
+```
+
+```{r distpred, out.width='70%',fig.cap='Distribució de la variable a predir (Resultat de l\'ECG).', echo=F}
+ggplot(data = data) +
+  geom_bar(mapping = aes(x = .data[[class]]))
+```
+
+Com podem observar, el conjunt de dades és perfecte. $300$ observacions per a cada una de les categories. Això és força extrany a la """"vida real"""".
+
+Podem obtenir una petita visualització de totes les variables (la distribució que segueixen) amb el paquet `reshape2` i `ggplot2`. Es veu una mica apretat, i les variables amb més *outliers* dificulten la visualització de les altres, però ens permeten tenir una idea de la situació (Figura \ref{fig:distall}).
+
+```{r distall, warning=F, out.width="100%", echo=F, fig.cap="Distribució de les variables contínues que trobades al dataset."}
+melted_data <- melt(data, id="ECG_signal")
+ggplot(melted_data, aes(x=variable, y=value)) + geom_boxplot() +
+  theme(axis.text.x = element_text(angle = 90, size=6))
+```
+
+Només amb els noms de les variables, veiem que hi ha molta similaritat entre aquests. És a dir, sospito que hi haurà una forta covariança entre moltes de les variables del *dataset*. Possiblement hi hagi alguna variable que és *linear dependent* d'altres; és a dir, una variable $y$ que sigui igual a una altra variable $x$ més una constant (o una altra variable): 
+
+$$y = x + a; \forall a \in \mathbb{R}$$
+
+Això ho podem observar en el següent gràfic, en el qual mostro \textit{scatter plots} per a diferents combinacions de dos variables triades arbitràriament -- més ben dit, amb els noms més o menys similars (sent això un indicador de potencial dependència lineal) (Figura \ref{fig:scatter}).
+
+```{r scatter, fig.show="hold", out.width="100%", echo=F, fig.cap="Scatter-plot d'algunes de les variables predictores presents al dataset (sense filtrar NAs)."}
+p1<-ggplot(data=data, mapping=aes(x=PQseg, y=Pseg)) + geom_point()
+p2<-ggplot(data=data, mapping=aes(x=QRSseg, y=QRseg)) + geom_point()
+p3<-ggplot(data=data, mapping=aes(x=NN50, y=pNN50)) + geom_point()
+p4<-ggplot(data=data, mapping=aes(x=RRmean, y=PPmean)) + geom_point()
+p5<-ggplot(data=data, mapping=aes(x=PQdis, y=PonQdis)) + geom_point()
+p6<-ggplot(data=data, mapping=aes(x=PRdis, y=PonRdis)) + geom_point()
+
+(p1 | p2 | p3) / (p4+p5+p6)
+```
+
+Això ho podem observar, d'una manera més general i per a totes les variables simultàniament en un únic gràfic, mitjançant el que s'anomena *correlation heatmap* (Figura \ref{fig:corheat}).
+
+```{r corheat, out.width="100%", fig.cap="Correlation heatmap de totes les variables contingudes al conjunt de dades inicial (sense filtrar NAs).", echo=F}
+whereisclass <- which(colnames(data)==class)
+corr_mat <- round(cor(data[, -whereisclass]),2)
+corr_mat[upper.tri(corr_mat)] <- NA
+melted_corr_mat <- melt(corr_mat)
+ggplot(data = melted_corr_mat, aes(x=Var1, y=Var2,
+                                   fill=value)) + 
+  geom_tile() + theme(axis.text.x = element_text(angle = 90, size=6)) + 
+  theme(axis.text.y = element_text(angle = 0, size=6))
+```
+
+Això, per exemple, seria un problema si tinguessim la intenció de generar un model de regressió múltiple amb algunes d'aquestes variables predictores, ja que estaríem amb un cas de multicolinealitat (estudiat a regressió lineal).
+
+\clearpage
+
+# Implementació dels diferents algorismes
+
+Primer de tot, carregaré els conjunts de dades *train* i *test*.
+
+```{r}
+train_data <- read.csv('train_data.csv', row.names=1)
+test_data <- read.csv('test_data.csv', row.names=1)
+
+## això em permetrà fer subsets amb només les dades predictores/classe a predir
+whereisclass <- which(colnames(train_data)==class)
+```
+
+A continuació creo una llista on guardaré els resultats de tots els models. Els guardaré com a una llista de tipus `named` amb `confusionMatrices` com a elements.
+
+```{r}
+cm_all <- list()
+```
+
+## Algorisme k-NN
+
+Per a la implementació d'aquest algorisme, utilitzaré les funcions que vaig crear per a la PEC $1$ d'aquesta mateixa assignatura. Primer de tot preparem les dades en el format que el meu codi permet. El codi no és perfecte al final del dia.
+
+```{r}
+## loading some custom functions
+source('R_code/knn_implemented_vicent.R')
+y_train <- train_data[, whereisclass]
+x_train <- train_data[, -whereisclass]
+x_test <- test_data[, -whereisclass]
+y_test <- test_data[, whereisclass]
+```
+
+Itero per tots els valors de l'hierparàmetre `k` que he de provar i en guardo els resultats.
+
+```{r, cache=T}
+require(class)
+ks_to_try <- params$ks_to_try
+cm_knn <- list()
+for (i in 1:length(ks_to_try)){
+  k = ks_to_try[i]
+  pred_test = predict_all_observations(x_test, x_train, train_labels=y_train, 
+                                       k=k, prob=F, seed=1234)
+  
+  ## aquí comprovo que els resultats són comparables amb els de knn implementat
+  ## al paquet class, que em prenc com el ground truth (sé que estan bé)
+  pred_class <- knn(train=x_train, test=x_test, cl=y_train,k=k)
+  stopifnot(sum(pred_class == pred_test) / nrow(test_data) >= 0.99)
+  
+  name_for_list <- paste('knn_with_k', k, sep='_')
+  cm_all[[name_for_list]] <- confusionMatrix(factor(pred_test), 
+                                                  factor(y_test))
+}
+```
+
+Mostro les matrius de confusió i mètriques generades en el següent *chunk*.
+
+```{r}
+for (each in names(cm_all)[grep('knn', x=names(cm_all))]){
+  cat(paste('Results for', each, '\n'))
+  print(cm_all[[each]])
+  cat('***************************************\n')
+}
+```
+
+Veiem que generalment la *performance* de l'algorisme k-NN és bona. Tots els models prediuen perfectament la classe `NSR` (*Normal Synus Rhythm*). La classe que més li costa predir correctament és la classe `AFF` (en prediu algunes instàncies com a `CHF`). Curiosament, el valor de $k$ que resulta en una millor *performance* global és 1 (és a dir, que només està jugant un paper el *nearest neighbor*). Aquest valor de `k` és el que porta a una millor predicció de les observacions que són realment `AFF`, però per contra és el que prediu pitjor `CHF`.
+
+## *Naive Bayes*
+
+Implemento l'algoritme *Naive Bayes* utilitzant el paquet `e1071`. Tal i com s'indica a l'enunciat de la PEC, provem aplicant la transformació de Laplace i sense. Al final, la probabilitat de que demà no surti el sol mai és 0.
+
+```{r}
+require(e1071)
+naive_0 <- naiveBayes(x_train, y_train, laplace=0)
+naive_1 <- naiveBayes(x_train, y_train, laplace=1)
+```
+
+Duc a terme les prediccions i guardo les `cm` a la llista global.
+
+```{r}
+pred_naive_0 <- predict(naive_0, x_test)
+pred_naive_1 <- predict(naive_1, x_test)
+cm_all[['naive_bayes_no_laplace']] <- confusionMatrix(pred_naive_0, factor(y_test))
+cm_all[['naive_bayes_w_laplace']] <- confusionMatrix(pred_naive_1, factor(y_test))
+```
+
+Mostro els resultats.
+
+```{r}
+for (each in names(cm_all)[grep('naive_bayes', x=names(cm_all))]){
+  cat(paste('Results for', each, '\n'))
+  print(cm_all[[each]])
+  cat('***************************************\n')
+}
+
+
+```
+
+Com podem veure, els models de tipus *Naive Bayes* mostren una pitjor *performance*. Això era esperable, ja que aquest tipus d'algorismes no estan pensats precisament per a predir classes amb conjunts de variables íntegrament contínues (ha de discretitzar-les -- fer-ne *bins* -- per a poder utilitzar-les).
+
+## Algorisme SVM
+
+Per a construir els models SVM, torno a juntar en un `dataframe` les dades $x$ (predictores) amb les dades $y$ (classe a predir).
+
+```{r}
+require(kernlab)
+data_train_full <- data.frame(x_train, y_train)
+data_train_full$y_train <- factor(data_train_full$y_train)
+kllineal <- ksvm(y_train ~ ., data=data_train_full, kernel='vanilladot')
+klrbf <- ksvm(y_train~., data=data_train_full, kernel='rbfdot')
+```
+
+Again, construeixo les prediccions i guardo les `confusionMatrices`.
+
+```{r}
+pred_lineal <- predict(kllineal, x_test)
+pred_rbf <- predict(klrbf, x_test)
+cm_all[['svm_lineal']] <- confusionMatrix(pred_lineal, factor(y_test))
+cm_all[['svm_rbf']] <- confusionMatrix(pred_rbf, factor(y_test))
+```
+
+*Printejo* les `confusions matrices`
+
+```{r}
+for (each in names(cm_all)[grep('svm', x=names(cm_all))]){
+  cat(paste('Results for', each, '\n'))
+  print(cm_all[[each]])
+  cat('***************************************\n')
+}
+```
+
+Veiem que, en quant als algorismes SVM, el que dóna millors resultats és el lineal.
+
+## *Decision tree*
+
+Per a dur a terme la creació del model d'arbre de decisió, utilitzo el paquet `C50`.
+
+```{r, cache=TRUE}
+require(C50)
+
+tree_no_boost <- C5.0(x_train, factor(y_train))
+tree_boost <- C5.0(x_train, factor(y_train), trials=10)
+
+pred_no_boost <- predict(tree_no_boost, x_test)
+pred_boost <- predict(tree_boost, x_test)
+
+cm_all[['tree_no_boost']] <- confusionMatrix(pred_no_boost, factor(y_test))
+cm_all[['tree_boost']] <- confusionMatrix(pred_boost, factor(y_test))
+```
+
+```{r}
+for (each in names(cm_all)[grep('tree', x=names(cm_all))]){
+  cat(paste('Results for', each, '\n'))
+  print(cm_all[[each]])
+  cat('***************************************\n')
+}
+```
+
+Curiosament, el model sense *boosting* té una millor *accuracy* general.
+
+## *Random Forest*
+
+```{r, cache=TRUE}
+require(randomForest)
+rdm_for_100 <- randomForest(x_train, factor(y_train), ntree=100, mtry=sqrt(ncol(x_train)))
+
+rdm_for_200 <- randomForest(x_train, factor(y_train), ntree=200, mtry=sqrt(ncol(x_train)))
+
+pred_for_100 <- predict(rdm_for_100, x_test)
+pred_for_200 <- predict(rdm_for_200, x_test)
+
+cm_all[['random_forest_100']] <- confusionMatrix(pred_for_100, factor(y_test))
+cm_all[['random_forest_200']] <- confusionMatrix(pred_for_200, factor(y_test))
+```
+
+```{r}
+for (each in names(cm_all)[grep('random_forest', x=names(cm_all))]){
+  cat(paste('Results for', each, '\n'))
+  print(cm_all[[each]])
+  cat('***************************************\n')
+}
+```
+Podem observar que els *random forests* (ambdós) prediuen les classes `ARR` i `NSR` de manera perfecta. Tenen potencial per a ser els millors models de tots.
+
+## *Neural Network*
+<!---
+Aquesta part del codi o del markdown s'encarrega de mirar si tenim disponible els resultats de les xarxes neuronals implementades amb python + keras. Òbviament depén de que tinguis instal·lat python, jupyter, etc.
+-->
+
+```{r, echo=F}
+should_we_run <- list.files('confusion_matrices/')
+
+if (length(should_we_run) < 2){
+  system('jupyter nbconvert --to pdf --execute PEC4-Python.ipynb')
+}
+```
+
+
+Els models de *deep learning* generats amb `Python` i `Keras`, els avaluaré juntament amb els altres en aquest document. Per a fer això, el fitxer `.ipynb` que conté el codi `Python`, que entrena + prediu el conjunt *test*, guarda les matrius de confusió com a resum de la seva performance, que és el que carrego a continuació i analitzo aquí.
+
+```{r}
+source('R_code/parse_cm.R')
+cm_all[["neural_net_1_hid"]] <- parse_from_csv('confusion_matrices/cm_nn1.csv')
+cm_all[["neural_net_2_hid"]] <- parse_from_csv('confusion_matrices/cm_nn2.csv')
+```
+
+Mostro els seus resultats.
+
+```{r}
+for (each in names(cm_all)[grep('neural', x=names(cm_all))]){
+  cat(paste('Results for', each, '\n'))
+  print(cm_all[[each]])
+  cat('***************************************\n')
+}
+```
+
+# Report final i conclusions
+
+Inicialitzo el dataframe on guardaré totes les mètriques d'interés.
+
+```{r}
+source('R_code/metrics.R')
+
+## dataframe amb les mètriques per classe
+dataframe_large_byclass = as.data.frame(round(cm_all[['knn_with_k_1']]$byClass, 3))
+dataframe_large_byclass$algorithm <- rep(names(cm_all)[1], 4)
+
+## dataframe amb les mètriques globals (1 fila per algoritme)
+dataframe_large_overall = as.data.frame(t(cm_all[['knn_with_k_1']]$overall[1:2]))
+dataframe_large_overall$f1score = f1_score(cm_all[['knn_with_k_1']])
+dataframe_large_overall$recall = recall(cm_all[['knn_with_k_1']])
+dataframe_large_overall$algorithm <- names(cm_all)[1]
+```
+
+
+Ara simplement itero per a totes les `confusionMatrices` que hi ha a la llista `cm_all`, i n'agafo les mètriques d'intrés (per classe i globals).
+
+```{r}
+for (each in 2:length(cm_all)){
+  we_are_doing = names(cm_all)[each]
+  byclass = as.data.frame(round(cm_all[[we_are_doing]]$byClass, 3))
+  byclass$algorithm <- rep(we_are_doing, 4)
+  overall = as.data.frame(t(cm_all[[we_are_doing]]$overall[1:2]))
+  overall$f1score <- f1_score(cm_all[[we_are_doing]])
+  overall$recall <- recall(cm_all[[we_are_doing]])
+  overall$algorithm <- we_are_doing
+  
+  dataframe_large_byclass = rbind(dataframe_large_byclass, byclass)
+  dataframe_large_overall = rbind(dataframe_large_overall, overall)
+}
+```
+
+Mostrem els resultats finals. També guardo els resultats per classe en un fitxer `csv` (a `results/results_by_class.csv`). He pensat maneres per a incloure d'alguna manera una visualització o taula amb aquests resultats, però finalment he decidit obviar-ho. Faré un petit comentari sobre els resultats globals a continuació (subjectes a una mica de variabilitat gràcies a les xarxes neuronals). Generalment, tots els models han mostrat una precisió gairebé perfecta a l'hora de predir la classe `NSR` (que podríem considerar com a la classe negativa, ja que entenc que correspon a no tenir cap aflicció). En canvi, a l'hora de discernir les tres patologies, aquí és on els models pateixen més. Especialment això es veritat per a la classe `AFF` (*Atrial Fibrillation*), seguida per la classe `CHF` (*Congestive heart failure*). La classe `ARR` (*Arrhythmia*) és, de les patologies, la més fàcil de predir correctament, destacant els models SVM i *random forest* que ambdós, en les seves dues configuracions cada un (lineal i amb *kernel* gaussià per als SVM; amb $100$ i $200$ arbres per als *RF*), prediuen correctament un $100\%$ de les vegades.
+
+```{r, echo=F}
+if (!dir.exists('results')){
+  dir.create('results')
+}
+write.csv(x = dataframe_large_byclass, file = 'results/results_by_class.csv')
+
+require(knitr)
+kable(dataframe_large_overall, digits = 3, align = 'c', 
+      caption="Resultats globals per als models provats en aquest informe. F1-score computat com a \"macro\" average")
+```
+
+Com podem veure, els models que funcionen millor, en general, són el model *random forest* i les xarxes neuronals. Entre aquests dos, costa decidir quin és millor. En quant a quin és el pitjor, sense cap dubte, són els models *naive bayes*. Aquests, com he comentat anteriorment, no són els millors per a classificació amb variables exclusivament númeriques i contínues. Jo tinc *bias* cap a les xarxes neuronals, ja que treballo amb elles i al final és el que més ho peta avui dia. Però sent el màxim d'*unbiased* que puc ser, diria que per números globals el millor model és el *random forest* amb $200$ arbres.

@@ -1,0 +1,14 @@
+*.tex
+*.zip
+.Rhistory
+.DS_Store
+.ipynb_checkpoints
+test.sh
+pec4-output
+pec4.Rproj
+confusion_matrices2
+PEC4-R_files
+PEC4-R_cache
+.Rproj.user/
+test_data.csv
+train_data.csv
