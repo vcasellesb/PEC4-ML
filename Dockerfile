@@ -24,6 +24,9 @@ USER user
 COPY --chown=user:user PEC4-R.Rmd /app
 COPY --chown=user:user PEC4-Python.ipynb /app
 COPY --chown=user:user R_code/ /app/R_code/
-COPY --chown=user:user ECGCvdata.csv /app
 COPY --chown=user:user main.R /app
+
+## Here you can change the input file
+COPY --chown=user:user ECGCvdata.csv /app
+
 ENTRYPOINT [ "Rscript", "main.R" ]

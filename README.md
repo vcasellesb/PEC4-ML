@@ -17,6 +17,16 @@ Es generaran els següents *outputs*:
 * Un fitxer `.pdf` resultat de córrer el *Jupyter Notebook* (`.ipynb`). Aquest realment no cal que s'inspeccioni, ja que s'analitza al fitxer `PEC4-R.Rmd` (i per tant al `pdf` amb el mateix nom), utilitzant-les per a valorar-ne la *performance*. Tot i això, recomano que s'obri per a entendre el codi `Python`.
 * Un fitxer `.csv` amb les mètriques per classe de tots els algorismes. Aquests resultats no es mostren explícitament a l'informe, però si que es comenten. Obriu-lo si voleu comprovar les afirmacions que faig allà.
 
+## Run dockerized
+
+You can run this code in a docker container. To do that (first install docker, obv), run the following command:
+
+```bash
+./run_dockerized.sh
+```
+
+If you wanna change the input file, please change the `DOCKERFILE` accordingly (and the `main.R params` also). Sorry if that's not convenient. I'm still learning.
+
 ### Canvis en els fitxers d'entrada
 
 Podeu canviar els paràmetres (com el fitxer `.csv` que s'analitzarà, la classe a predir...) modificant el fitxer `main.R`. Mireu els paràmetres que s'expliciten allà per a entendre que necessiteu especificar.
