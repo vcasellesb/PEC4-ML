@@ -33,7 +33,7 @@ Podeu canviar els paràmetres (com el fitxer `.csv` que s'analitzarà, la classe
 
 ### Separació *train test*
 
-Es duu a terme amb una partició $67\% - 33\%$. Ho duu a terme el fitxer `R_code/split_dataset.R`. Si voleu veure com ho faig, obriu aquest fitxer.
+Es duu a terme amb una partició $67\%$ - $33\%$. Ho duu a terme el fitxer `R_code/split_dataset.R`. Si voleu veure com ho faig, obriu aquest fitxer.
 
 ### Assumpcions que fa aquest *projecte*
 
