@@ -4,7 +4,7 @@
 #     * 2/3 -> training data
 #     * 1/3 -> test data
 # If you wish to change this feel free. Just update the probabilities given
-# to sample(). Other this to consider is the format of the input dataset.
+# to sample(). Other things to consider is the format of the input dataset.
 # Here, we assume that the dataset has a column containing row names as the first
 # column. Again, change to your convenience.
 
