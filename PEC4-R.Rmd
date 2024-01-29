@@ -1,12 +1,12 @@
 ---
-title: 'PEC 4: Predicció de dolències cardíaques a partir d"un 
-electrocardiograma -- Part en R'
+title: "PEC 4: Predicció de dolències cardíaques a partir dun 
+electrocardiograma Part en R"
 author: "Vicent Caselles Ballester"
 date: "`r Sys.Date()`"
 output: pdf_document
 params:
-  data: ECGCvdata.csv
-  ks_to_try: !r c(1, 3, 5, 7)
+  data: input_data/ECGCvdata.csv
+  ks_to_try: "`r c(1, 3, 5, 7)`"
   class: ECG_signal
 ---
 

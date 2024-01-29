@@ -12,3 +12,4 @@ PEC4-R_cache
 .Rproj.user/
 test_data.csv
 train_data.csv
+.RData

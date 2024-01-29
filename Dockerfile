@@ -12,7 +12,7 @@ RUN pip3 install --upgrade pip
 RUN mkdir -p /app && chown user:user /app
 WORKDIR /app
 
-RUN chmod 777 /app && chmod a+s /app
+RUN chmod -R 777 /app && chmod a+s /app
 COPY requirements.txt /app/requirements.txt
 COPY requirements.R /app/requirements.R
 
@@ -25,8 +25,5 @@ COPY --chown=user:user PEC4-R.Rmd /app
 COPY --chown=user:user PEC4-Python.ipynb /app
 COPY --chown=user:user R_code/ /app/R_code/
 COPY --chown=user:user main.R /app
-
-## Here you can change the input file
-COPY --chown=user:user ECGCvdata.csv /app
 
 ENTRYPOINT [ "Rscript", "main.R" ]
