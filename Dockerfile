@@ -25,5 +25,6 @@ COPY --chown=user:user PEC4-R.Rmd /app
 COPY --chown=user:user PEC4-Python.ipynb /app
 COPY --chown=user:user R_code/ /app/R_code/
 COPY --chown=user:user main.R /app
+COPY --chown=user:user mv-output.sh /app
 
 ENTRYPOINT [ "Rscript", "main.R" ]

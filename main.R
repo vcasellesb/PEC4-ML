@@ -6,3 +6,5 @@ rmarkdown::render('PEC4-R.Rmd',
                   params=list(data = 'input_data/ECGCvdata.csv', 
                               ks_to_try=c(1, 3, 5, 7), class='ECG_signal'), 
                   output_format=c("pdf_document", "html_document"))
+
+system("./mv-output.sh")
